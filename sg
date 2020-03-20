@@ -1,0 +1,138 @@
+#!/bin/bash
+
+[ -e ~/.sgcli ] && SG_URL=`cat ~/.sgcli | sed -En 's/^SG_URL *= *//p'`
+[ -e ~/.sgcli ] && TOKEN=`cat ~/.sgcli | sed -En 's/^TOKEN *= *//p'`
+[ -e ~/.sgcli ] && TENANT=`cat ~/.sgcli | sed -En 's/^TENANT *= *//p'`
+[ -e ~/.sgcli -a "x" == "x$TENANT" ] && TENANT=`cat ~/.sgcli | sed -En 's/^LAST_TENANT *= *//p'`
+
+verb=$1
+
+function _help {
+    cat $0 | sed -n -E "/^function _(.*) {/{ s/function _(.*) {/\1/; s/_/ /g;p; }"
+}
+
+[ "$verb" == "help" ] && { _help; exit 0; }
+
+[ "x" == "x$SG_URL" ] && \
+    read -p "StorageGRID URL : " SG_URL \
+    && echo "SG_URL = $SG_URL" >> ~/.sgcli
+
+
+
+
+function _user_show {
+
+    curl -s -k -X GET "$SG_URL/org/users" \
+            -H "accept: application/json" \
+            -H "Content-Type: application/json" \
+            -H "X-Csrf-Token: 7eabc2e29cbad36137bb58e767f39ce9" \
+            -H "Authorization: Bearer $TOKEN" | jq -r '.data[] | .uniqueName + " " + .id + " " + .userURN' | column -t
+}
+
+function _user_get {
+    [ -z $1 ] && { 
+        echo "`echo $0"${SG_CLI_FUNCTION}"|tr "_" " "` ${verb} <userid>"; exit 0; 
+        }
+
+    curl -s -k -X GET "$SG_URL/org/users/$1" \
+        -H "accept: application/json" \
+        -H "Content-Type: application/json" \
+        -H "X-Csrf-Token: 7eabc2e29cbad36137bb58e767f39ce9" \
+        -H "Authorization: Bearer $TOKEN" | jq -r '.data'
+ 
+}
+function _user_create {
+
+    [ -z $1 ] && { 
+        echo "`echo $0"${SG_CLI_FUNCTION}"|tr "_" " "` ${verb} <username> <full name>";
+        echo "`echo $0"${SG_CLI_FUNCTION}"|tr "_" " "` ${verb} <username> <full name> <group_id_1> <group_id_2> ..."; exit 0; 
+        }
+
+    unique=$1
+    shift
+    fullName=$1
+    shift
+    group=$1
+    if [ -n "$group" ];
+    then
+        groups="$group"
+        while shift;
+        do
+            [ -n "$1" ] && groups="$groups\",\"$1"
+        done
+    fi
+
+    [ -n $groups ] && group_json="\"memberOf\": [\"$groups\"],"
+
+    curl -s -k -X POST "$SG_URL/org/users" \
+            -H "accept: application/json" \
+            -H "Content-Type: application/json" \
+            -H "X-Csrf-Token: 7eabc2e29cbad36137bb58e767f39ce9" \
+            -H "Authorization: Bearer $TOKEN" \
+            -d "{ \"fullName\": \"$fullName\", $group_json \"disable\": false, \"uniqueName\": \"user/$unique\"}" | jq -r '. | "\( .code ) " + .status,.data.id'
+
+}
+
+function _user_delete {
+    [ -z $1 ] && { 
+        echo "`echo $0"${SG_CLI_FUNCTION}"|tr "_" " "` ${verb} <userid>"; exit 0; 
+        }
+    
+    id=$1
+
+    curl --fail -k -X DELETE "$SG_URL/org/users/$id" \
+            -H "accept: application/json" \
+            -H "Content-Type: application/json" \
+            -H "X-Csrf-Token: 7eabc2e29cbad36137bb58e767f39ce9" \
+            -H "Authorization: Bearer $TOKEN" && echo "Success" || echo "Error"
+
+}
+
+function _group_show {
+
+    curl -s -k -X GET "$SG_URL/org/groups" \
+            -H "accept: application/json" \
+            -H "Content-Type: application/json" \
+            -H "X-Csrf-Token: 7eabc2e29cbad36137bb58e767f39ce9" \
+            -H "Authorization: Bearer $TOKEN" | jq -r '.data[] | .uniqueName + " " + .id + " " + .groupURN' | column -t
+}
+
+function authenticate {
+    read -p "Tenant [$TENANT] : " _TENANT
+    read -p "Username : " USER
+    read -s -p "Password : " PASS
+    echo
+
+    [ "x" != "x$_TENANT" ] && TENANT=$_TENANT
+
+    ( [ -e ~/.sgcli ] && sed -E -i.tmp "s/^LAST_TENANT *=.*/LAST_TENANT = $TENANT/" ~/.sgcli ) || echo "LAST_TENANT = $TENANT" >> ~/.sgcli
+
+    [ -e ~/.sgcli ] && SG_URL=`cat ~/.sgcli | sed -En 's/^SG_URL *= *//p'`
+
+    TOKEN=`curl -s -k -X POST "$SG_URL/authorize" \
+        -H "accept: application/json" \
+        -H "Content-Type: application/json" \
+        -H "X-Csrf-Token: 7eabc2e29cbad36137bb58e767f39ce9" \
+        -d "{ \"accountId\": \"$TENANT\", \"username\": \"$USER\", \"password\": \"$PASS\", \"cookie\": true, \"csrfToken\": false}" \
+        | sed -E 's/.*"data":"([^"]+)".*/\1/'`
+
+    grep -E "^TOKEN *=.*" ~/.sgcli && sed -E -i.tmp "s/^TOKEN *=.*/TOKEN = $TOKEN/" ~/.sgcli || echo "TOKEN = $TOKEN" >> ~/.sgcli
+}
+
+[ -z "$TOKEN" -o "x22" == "x$( curl --fail -s -k -X GET "$SG_URL/org/users" \
+            -H "accept: application/json" \
+            -H "Content-Type: application/json" \
+            -H "X-Csrf-Token: 7eabc2e29cbad36137bb58e767f39ce9" \
+            -H "Authorization: Bearer $TOKEN"; echo $?; )" ] && authenticate
+
+
+type ${SG_CLI_FUNCTION}_$verb &> /dev/null
+
+if [ "x0" == "x$?" ]
+then
+    shift
+    ${SG_CLI_FUNCTION}_$verb "$@"
+else
+    shift
+    SG_CLI_FUNCTION=${SG_CLI_FUNCTION}_$verb $0 "$@"
+fi
