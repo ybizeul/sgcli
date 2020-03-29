@@ -1,5 +1,6 @@
-#!/bin/bash -x
+#!/bin/bash
 
+which jq &> /dev/null || { echo "jq cli is not installed, exiting."; exit 1; }
 [ -e ~/.sgcli ] && SG_URL=`cat ~/.sgcli | sed -En 's/^SG_URL *= *//p'`
 [ -e ~/.sgcli ] && TOKEN=`cat ~/.sgcli | sed -En 's/^TOKEN *= *//p'`
 [ -e ~/.sgcli ] && TENANT=`cat ~/.sgcli | sed -En 's/^TENANT *= *//p'`
